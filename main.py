@@ -5,7 +5,6 @@ import numpy as np
 from datetime import datetime as dt
 from matplotlib import pyplot as plt
 import random
-import Quandl
 import itertools
 import time
 import dateutil
@@ -61,21 +60,6 @@ class Backtest():
         VTix = VT.ix
         UTix = UT.ix
 
-        ##        fig,ax=plt.subplots()
-        ##        ax.semilogy(-np.diff(sigma[:50]))
-        ##        plt.show()
-        #print('V: '+str(V.shape))
-
-
-        #print(pd.DataFrame(sigma))
-
-        #d = pertinent eigentriples
-
-
-        #for i in range(d):
-        #   tempV[:,i:i+1] = np.array((X.T).dot(U[:,i])/sigma[i])
-
-
 
         #Potential Pairs
         #### 0-14 ###
@@ -84,12 +68,6 @@ class Backtest():
         Xtilde = np.zeros((d, L, L))
         Xtilde = [np.array(sigma[i] * np.outer(U.ix[:, i].values, V.ix[i].values))
                   for i in range(d)]
-
-
-        #for i in range(d):
-        #   Xtilde[i] = sigma[i]*np.outer(U[:,i],tempV[:,i])
-
-
 
 
         ##create X1 X2 X3 GROUPED
@@ -122,20 +100,6 @@ class Backtest():
         g2 = np.concatenate((XXsum0[2], XXsum1[2], XXsum2[2]))
         g = g0 + g1 + g2
 
-        ##    g = [[1.0/(k+1)*(np.sum([XX[j,i,k-i] for i in range(k+1)])) if k < L-1
-        ##          else 1.0/L*(np.sum([XX[j,i,k-i] for i in range(L)])) if L-1<=k<K
-        ##          else 1.0/(N-k)*(np.sum([XX[j,i,k-i] for i in range(k-K+1,N-K+1)]))
-        ##          for j in range(3)] for k in range(N)]
-
-        """for k in range(N):
-            for j in range(3):
-                if k < L-1:
-                    g[k,j] = 1.0/(k+1)*(np.sum([XX[j,i,k-i] for i in range(k+1)]))
-                if L-1 <= k < K:
-                    g[k,j] = 1.0/L*(np.sum([XX[j,i,k-i] for i in range(L)]))
-                if K <= k < N:
-                    g[k,j] = 1.0/(N-k)*(np.sum([XX[j,i,k-i] for i in range(k-K+1,N-K+1)]))
-        """
         #k = N-1
         #N-K+1,N-K+1
         # L-1,L
@@ -178,6 +142,7 @@ class Backtest():
         print("SSALoop " + str(es.index[-1]) + ": " + str(time.clock() - timeStart) + " sec")
 
         return g2
+    
 
     def generate_pnl(self, exposure):
         delta_price = self.prices.pct_change()
