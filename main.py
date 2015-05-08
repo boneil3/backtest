@@ -14,11 +14,10 @@ class Backtest():
     def __init__(self):
         self.prices =  # get prices
 
-    def get_ssa_prediction(self):
+    def get_ssa_prediction(self, es):
         """ Generate prediction from prices """
 
         # ES OF TYPE DATAFRAME PANDAS
-        es = self.prices
         M = 100
         d = 20
         bewl = False
@@ -142,7 +141,29 @@ class Backtest():
         print("SSALoop " + str(es.index[-1]) + ": " + str(time.clock() - timeStart) + " sec")
 
         return g2
-    
+
+    def generate_exposure(self):
+        """
+        :return: exposure to calculate PnL
+        """
+
+        prices = self.prices
+        sec = prices.columns[0]
+        N = prices.shape[0]
+        m = 200 #  number of days out of sample, N-m = days in sample
+        if not isinstance(prices, pd.DataFrame):
+            raise AssertionError('prices must be a DataFrame')
+
+        #  array of dataframes of predictions
+        oo_sample = range(N-m, N-1, 10)
+        oo_sample_idx = [prices.index[i] for i in oo_sample]
+
+        predictions = [self.get_ssa_prediction(pd.DataFrame(prices.ix[:i, sec])) for i in oo_sample]
+        pred_iter = zip(oo_sample_idx, predictions)
+        exposure = np.zeros_like(prices.index)
+        
+        for idx, pred in pred_iter:
+
 
     def generate_pnl(self, exposure):
         delta_price = self.prices.pct_change()
