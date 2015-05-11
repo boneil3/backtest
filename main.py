@@ -12,35 +12,29 @@ import dateutil
 
 class Backtest():
     def __init__(self):
-        self.prices =  # get prices
+        self.prices = pd.read_csv('CCY_daily.csv', index_col=0, parse_dates=True)
 
-    def get_ssa_prediction(self, es):
+    def get_ssa_prediction(self, es, M=200):
         """ Generate prediction from prices """
 
         # ES OF TYPE DATAFRAME PANDAS
-        M = 100
         d = 20
         bewl = False
         N = es.shape[0]
-        # print(N)
         timeStart = time.clock()
         if int(N / 2) == N / 2:
             es = es[1:]
             N -= 1
         L = int(N / 2) + 1
         K = N - L + 1
-
-        #N-K+1 = L
+        # N-K+1 = L
         #L = N/2
         #N/2 = N-K+1
         #K = N/2+1 = L+1
         #2K -N - 1= 1
-        XT = pd.DataFrame(np.zeros((K, L)))
-        a = np.zeros(L)
 
-        esix = es.ix
-
-        X = pd.DataFrame([esix[i:i + L].values for i in range(K)])
+        esix = es.iloc
+        X = pd.DataFrame([esix[i:i + L, 0].tolist() for i in range(K)])
         #for i in range(K):
         #XTix[i] = esix[i:i+L]
 
@@ -55,16 +49,11 @@ class Backtest():
         V = pd.DataFrame(V)
         UT = U.T
 
-        VT = V.T
-        VTix = VT.ix
-        UTix = UT.ix
-
 
         #Potential Pairs
         #### 0-14 ###
         #periodogram analysis
 
-        Xtilde = np.zeros((d, L, L))
         Xtilde = [np.array(sigma[i] * np.outer(U.ix[:, i].values, V.ix[i].values))
                   for i in range(d)]
 
@@ -119,9 +108,7 @@ class Backtest():
         Rp = np.zeros((d, L - 1))
 
         Rp = [pi[i] * (Uiloc[:L - 1, i]) for i in range(d)]
-        ##    for i in range(d):
-        ##        Rp[i] = pi[i]*P[:L-1,i]
-        R = np.zeros(L - 1)
+
         R = 1 / (1 - vS) * np.sum(Rp, axis=0)
         R = R[::-1]
         #How many predictions? M
@@ -142,34 +129,78 @@ class Backtest():
 
         return g2
 
-    def generate_exposure(self):
+    def generate_exposure(self, sec_num):
         """
         :return: exposure to calculate PnL
         """
 
         prices = self.prices
-        sec = prices.columns[0]
         N = prices.shape[0]
-        m = 200 #  number of days out of sample, N-m = days in sample
+        m = 600  # number of days out of sample, N-m = days in sample
+        min_delta = .01  # min prediction move to change exposure
         if not isinstance(prices, pd.DataFrame):
             raise AssertionError('prices must be a DataFrame')
 
-        #  array of dataframes of predictions
-        oo_sample = range(N-m, N-1, 10)
+        # array of dataframes of predictions
+        oo_sample = range(N - m, N - 1, 10)
         oo_sample_idx = [prices.index[i] for i in oo_sample]
 
-        predictions = [self.get_ssa_prediction(pd.DataFrame(prices.ix[:i, sec])) for i in oo_sample]
+        predictions = [self.get_ssa_prediction(pd.DataFrame(prices.iloc[:i, sec_num]), M=m - j * 10 + 1) for j, i in
+                       enumerate(oo_sample)]
         pred_iter = zip(oo_sample_idx, predictions)
-        exposure = np.zeros_like(prices.index)
-        
+
+        pred_dfs = []
         for idx, pred in pred_iter:
+            ret_pred = pd.DataFrame(pred, index=prices.index, columns=[str(idx)])
+            pred_dfs.append(ret_pred)
 
+        exposure = np.zeros(N)
+        for i, idx in enumerate(prices.index):
+            if i == 0:
+                pass
+            elif idx in oo_sample_idx:
+                inter_pred = None
+                for pred in pred_dfs:
+                    if pred.columns == [str(idx)]:
+                        inter_pred = pred
+                p_data = inter_pred.iloc[i:, 0].values
+                a = np.diff(np.sign(np.diff(p_data))).nonzero()[0] + 1
 
-    def generate_pnl(self, exposure):
+                pred_0 = inter_pred.iloc[i, 0]
+                val_0 = prices.iloc[i, sec_num]
+                if a.size >= 2 and abs((pred_0 - val_0) / val_0) < .01:
+                    extrema_1 = inter_pred.iloc[i + a[0], 0]
+                    extrema_2 = inter_pred.iloc[i + a[1], 0]
+                    if (extrema_1 - pred_0) / pred_0 > min_delta and (extrema_2 - pred_0) / pred_0 > min_delta:
+                        exposure[i] = 1
+                    elif (extrema_1 - pred_0) / pred_0 < -min_delta and (extrema_2 - pred_0) / pred_0 < -min_delta:
+                        exposure[i] = -1
+                    else:
+                        exposure[i] = 0
+                else:
+                    exposure[i] = exposure[i - 1]
+            else:
+                exposure[i] = exposure[i - 1]
+        return exposure
+
+    def generate_pnl(self, exposure, sec_num):
         delta_price = self.prices.pct_change()
-        delta_portfolio = delta_price * exposure
+        delta_portfolio = pd.DataFrame(delta_price.iloc[:, sec_num].values * exposure, index=self.prices.index)
+        print(delta_portfolio)
+        pnl = pd.DataFrame(data=np.ones_like(exposure), index=self.prices.index, columns=['Value'])
+        for i, val in enumerate(delta_portfolio.iloc[:, 0].values):
+            if i == 0:
+                pass
+            else:
+                pnl.iloc[i] = pnl.iloc[i - 1] * (1.0 + val)
+        print(pnl)
+        return pnl
 
-        pnl = pd.DataFrame(np.ones(delta_portfolio.shape[0]), index=self.prices.index)
-        for i in range(len(pnl.index) - 1):
-            pnl.items[i + 1] = (pnl.items[i] + 1) * delta_portfolio.items[i]
-            
+
+x = Backtest()
+fig, ax = plt.subplots()
+for sec_num in range(len(x.prices.columns)):
+    exp = x.generate_exposure(sec_num)
+    pnl = x.generate_pnl(exp, sec_num)
+    pnl.plot(ax=ax)
+plt.show()
