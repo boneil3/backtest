@@ -142,10 +142,10 @@ class Backtest():
             raise AssertionError('prices must be a DataFrame')
 
         # array of dataframes of predictions
-        oo_sample = range(N - m, N - 1, 60)
+        oo_sample = range(N - m, N - 1, 30)
         oo_sample_idx = [prices.index[i] for i in oo_sample]
 
-        predictions = [self.get_ssa_prediction(pd.DataFrame(prices.iloc[:i, sec_num]), M=m - j * 60 + 1) for j, i in
+        predictions = [self.get_ssa_prediction(pd.DataFrame(prices.iloc[:i-1, sec_num]), M=m - j * 30 + 1) for j, i in
                        enumerate(oo_sample)]
         pred_iter = zip(oo_sample_idx, predictions)
 
@@ -176,11 +176,19 @@ class Backtest():
                     elif (extrema_1 - pred_0) / pred_0 < -min_delta and (extrema_2 - pred_0) / pred_0 < -min_delta:
                         exposure[i] = -1
                     else:
-                        exposure[i] = 0
+                        exposure[i] = exposure[i - 1]
                 else:
                     exposure[i] = exposure[i - 1]
             else:
                 exposure[i] = exposure[i - 1]
+
+            # Stop Loss Check
+            # First find last local extremum
+            if i > N-m:
+                if (exposure[i-1] > 0 and (self.prices.iloc[i-1, sec_num] - val_0) / val_0 < -.015) or \
+                        (exposure[i-1] < 0 and (self.prices.iloc[i-1, sec_num] - val_0) / val_0 > .015):
+                    exposure[i] = 0
+
         return exposure
 
     def generate_pnl(self, exposure, sec_num):
