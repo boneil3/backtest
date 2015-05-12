@@ -142,10 +142,10 @@ class Backtest():
             raise AssertionError('prices must be a DataFrame')
 
         # array of dataframes of predictions
-        oo_sample = range(N - m, N - 1, 10)
+        oo_sample = range(N - m, N - 1, 60)
         oo_sample_idx = [prices.index[i] for i in oo_sample]
 
-        predictions = [self.get_ssa_prediction(pd.DataFrame(prices.iloc[:i, sec_num]), M=m - j * 10 + 1) for j, i in
+        predictions = [self.get_ssa_prediction(pd.DataFrame(prices.iloc[:i, sec_num]), M=m - j * 60 + 1) for j, i in
                        enumerate(oo_sample)]
         pred_iter = zip(oo_sample_idx, predictions)
 
@@ -186,21 +186,36 @@ class Backtest():
     def generate_pnl(self, exposure, sec_num):
         delta_price = self.prices.pct_change()
         delta_portfolio = pd.DataFrame(delta_price.iloc[:, sec_num].values * exposure, index=self.prices.index)
-        print(delta_portfolio)
+
         pnl = pd.DataFrame(data=np.ones_like(exposure), index=self.prices.index, columns=['Value'])
         for i, val in enumerate(delta_portfolio.iloc[:, 0].values):
             if i == 0:
                 pass
             else:
                 pnl.iloc[i] = pnl.iloc[i - 1] * (1.0 + val)
-        print(pnl)
         return pnl
 
 
 x = Backtest()
 fig, ax = plt.subplots()
+pnls = []
 for sec_num in range(len(x.prices.columns)):
+    if x.prices.columns[sec_num] == 'USDJPY':
+        continue
+    print(x.prices.columns[sec_num])
     exp = x.generate_exposure(sec_num)
     pnl = x.generate_pnl(exp, sec_num)
+    pnl.columns = [str(x.prices.columns[sec_num])]
+    pnls.append(pnl)
     pnl.plot(ax=ax)
+    pnl.columns = ['Value']
+
+total_pnl = pnls[0]
+for i in range(1, len(pnls)):
+    total_pnl = total_pnl + pnls[i]
+total_pnl = total_pnl / float(len(pnls))
+fig2, ax2 = plt.subplots()
+total_pnl.plot(ax=ax2)
 plt.show()
+
+# TODO: Stop losses on bad predictions
