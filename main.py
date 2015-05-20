@@ -9,10 +9,14 @@ import itertools
 import time
 import dateutil
 
+import sys
+sys.path.append('raw_data')
+
 
 class Backtest():
     def __init__(self):
-        self.prices = pd.read_csv('CCY_daily.csv', index_col=0, parse_dates=True)
+        self.prices = pd.read_csv('raw_data/CCY_2000.csv', index_col=0, parse_dates=True)
+
 
     def get_ssa_prediction(self, es, M=200):
         """ Generate prediction from prices """
@@ -129,23 +133,26 @@ class Backtest():
 
         return g2
 
-    def generate_exposure(self, sec_num):
+    def generate_exposure(self, sec_num, m=500, w=20):
         """
         :return: exposure to calculate PnL
         """
 
         prices = self.prices
         N = prices.shape[0]
-        m = 600  # number of days out of sample, N-m = days in sample
-        min_delta = .01  # min prediction move to change exposure
+        # m = number of days out of sample, N-m = days in sample
+        # w = days between predictions
+        min_delta = .02  # min prediction move to change exposure
+        max_loss = .0125
+        max_lev = 2
         if not isinstance(prices, pd.DataFrame):
             raise AssertionError('prices must be a DataFrame')
 
         # array of dataframes of predictions
-        oo_sample = range(N - m, N - 1, 30)
+        oo_sample = range(N - m, N - 1, w)
         oo_sample_idx = [prices.index[i] for i in oo_sample]
 
-        predictions = [self.get_ssa_prediction(pd.DataFrame(prices.iloc[:i-1, sec_num]), M=m - j * 30 + 1) for j, i in
+        predictions = [self.get_ssa_prediction(pd.DataFrame(prices.iloc[:i-1, sec_num]), M=m - j * w + 1) for j, i in
                        enumerate(oo_sample)]
         pred_iter = zip(oo_sample_idx, predictions)
 
@@ -179,15 +186,24 @@ class Backtest():
                         exposure[i] = exposure[i - 1]
                 else:
                     exposure[i] = exposure[i - 1]
-            else:
-                exposure[i] = exposure[i - 1]
 
             # Stop Loss Check
             # First find last local extremum
-            if i > N-m:
-                if (exposure[i-1] > 0 and (self.prices.iloc[i-1, sec_num] - val_0) / val_0 < -.015) or \
-                        (exposure[i-1] < 0 and (self.prices.iloc[i-1, sec_num] - val_0) / val_0 > .015):
+
+            elif i > N-m:
+                # Stop loss
+                if (exposure[i-1] > 0 and (self.prices.iloc[i-1, sec_num] - val_0) / val_0 < -max_loss) or \
+                        (exposure[i-1] < 0 and (self.prices.iloc[i-1, sec_num] - val_0) / val_0 > max_loss):
                     exposure[i] = 0
+                # Lever up
+                elif exposure[i-1] > 0 and self.prices.iloc[i-1, sec_num] > val_0 and \
+                        exposure[i-1] < max_lev:
+                    exposure[i] = exposure[i-1] + 0.1
+                elif exposure[i-1] < 0 and self.prices.iloc[i-1, sec_num] < val_0 and \
+                        exposure[i-1] > -max_lev:
+                    exposure[i] = exposure[i-1] - 0.1
+            else:
+                exposure[i] = exposure[i - 1]
 
         return exposure
 
@@ -203,27 +219,73 @@ class Backtest():
                 pnl.iloc[i] = pnl.iloc[i - 1] * (1.0 + val)
         return pnl
 
+    def run(self, security, start_idx=0, end_idx=-1, len_sample=200, delta_sample=20, plot_bool=True):
 
-x = Backtest()
-fig, ax = plt.subplots()
-pnls = []
-for sec_num in range(len(x.prices.columns)):
-    if x.prices.columns[sec_num] == 'USDJPY':
-        continue
-    print(x.prices.columns[sec_num])
-    exp = x.generate_exposure(sec_num)
-    pnl = x.generate_pnl(exp, sec_num)
-    pnl.columns = [str(x.prices.columns[sec_num])]
-    pnls.append(pnl)
-    pnl.plot(ax=ax)
-    pnl.columns = ['Value']
+        if not isinstance(start_idx, int):
+            raise TypeError('Start index not int')
+        if not isinstance(len_sample, int):
+            raise TypeError('Length of sample not int')
+        if not isinstance(delta_sample, int):
+            raise TypeError('Length of sample not int')
+        if not isinstance(plot_bool, bool):
+            raise TypeError('Length of sample not bool')
+        if not isinstance(security, str) and not isinstance(security, int) and not isinstance(security, list):
+            raise TypeError('Security must be string or int or list of string/ints')
 
-total_pnl = pnls[0]
-for i in range(1, len(pnls)):
-    total_pnl = total_pnl + pnls[i]
-total_pnl = total_pnl / float(len(pnls))
-fig2, ax2 = plt.subplots()
-total_pnl.plot(ax=ax2)
-plt.show()
+        if end_idx - start_idx > self.prices.shape[0] or (end_idx - start_idx < 0 and end_idx > 0):
+            raise ValueError('Start and end indices do not work')
+        elif start_idx != 0 and end_idx != -1:
+            self.prices = self.prices.iloc[start_idx:end_idx]
+        elif end_idx != -1:
+            self.prices = self.prices.iloc[:end_idx]
+        elif start_idx != 0:
+            self.prices = self.prices.iloc[start_idx:]
 
-# TODO: Stop losses on bad predictions
+        sec_list = []
+        if isinstance(security, str):
+            if security.lower() == 'all':
+                sec_list = self.prices.columns
+                pnls = []
+                for s in range(len(self.prices.columns)):
+                    exp = self.generate_exposure(s, m=len_sample, w=delta_sample)
+                    pnl = self.generate_pnl(exp, s)
+                    pnls.append(pnl)
+            else:
+                sec = self.prices.columns.index(security)
+                exp = self.generate_exposure(sec, m=len_sample, w=delta_sample)
+                pnls = [self.generate_pnl(exp, sec)]
+                sec_list = security
+        elif isinstance(security, list):
+            pnls = []
+            for s in security:
+                if isinstance(s, str):
+                    sec = self.prices.columns.index(s)
+                else:
+                    sec = s
+                    sec_list.append(self.prices.columns[sec])
+                exp = self.generate_exposure(sec, m=len_sample, w=delta_sample)
+                pnl = self.generate_pnl(exp, sec)
+                pnls.append(pnl)
+        else:
+            exp = self.generate_exposure(security, m=len_sample, w=delta_sample)
+            pnls = [self.generate_pnl(exp, security)]
+            sec_list = [self.prices.columns[security]]
+
+        if plot_bool:
+            total_pnl = pnls[0]
+            fig, ax = plt.subplots()
+
+            for i, p in enumerate(pnls):
+                p.columns = [sec_list[i]]
+                p.plot(ax=ax)
+                p.columns = ['Value' for i in range(len(p.columns))]
+                if i > 0:
+                    total_pnl = total_pnl + p
+
+            total_pnl = total_pnl / float(len(pnls))
+            fig2, ax2 = plt.subplots()
+            total_pnl.plot(ax=ax2)
+            plt.show()
+
+#x = Backtest()
+#x.run(0, start_idx=1000, len_sample=500, delta_sample=10)
